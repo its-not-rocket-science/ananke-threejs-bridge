@@ -12,7 +12,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@its-not-rocket-science/ananke": "^0.1.3",
+    "@its-not-rocket-science/ananke": "^0.1.4",
     "three": "^0.170.0"
   },
   "devDependencies": {
