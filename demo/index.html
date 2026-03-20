@@ -254,13 +254,11 @@
       //   import { mkKnight, mkBoxer, mkWorld, ... } from "@its-not-rocket-science/ananke";
 
       import {
-        mkHumanoidEntity,
-        mkWorld,
+        createWorld,
         stepWorld,
         SCALE,
         extractRigSnapshots,
         BridgeEngine,
-        STARTER_WEAPONS,
         q,
       } from "@its-not-rocket-science/ananke";
 
@@ -315,16 +313,12 @@
         tickCount  = 0;
         fightOver  = false;
 
-        // mkHumanoidEntity(id, teamId, x_m, y_m) — positions in real metres,
-        // converted internally to SCALE.m fixed-point by testing.ts.
-        const entity1 = mkHumanoidEntity(1, 1, -ARENA_M, 0);
-        const entity2 = mkHumanoidEntity(2, 2,  ARENA_M, 0);
-
-        // Equip with fists (default) — or find a weapon from STARTER_WEAPONS:
-        // const sword = STARTER_WEAPONS.find(w => w.id === "wpn_longsword");
-        // if (sword) entity1.loadout.items.push(sword);
-
-        world = mkWorld(seed, [entity1, entity2]);
+        // createWorld(seed, entitySpecs) — Tier-1 factory.
+        // EntitySpec positions are set to face each other at ARENA_M metres apart.
+        world = createWorld(seed, [
+          { id: 1, teamId: 1, seed: 1, archetype: "KNIGHT_INFANTRY", weaponId: "fist" },
+          { id: 2, teamId: 2, seed: 2, archetype: "PRO_BOXER",       weaponId: "fist" },
+        ]);
 
         // Commands: both entities attack each other each tick.
         // TODO: replace with an AI intent loop (see ananke src/sim/ai/).
