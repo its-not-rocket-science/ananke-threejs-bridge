@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ananke Three.js Bridge — Demo</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+
+      body {
+        background: #0d0d1a;
+        color: #c8d0e0;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        overflow: hidden;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+
+      #canvas-container {
+        position: relative;
+        flex: 1;
+        overflow: hidden;
+      }
+
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+
+      /* HUD overlay */
+      #hud {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        padding: 12px 16px;
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        pointer-events: none;
+      }
+
+      #hud-left {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      #hud-right {
+        text-align: right;
+        font-size: 11px;
+        opacity: 0.7;
+        line-height: 1.8;
+      }
+
+      .entity-bar {
+        background: rgba(0,0,0,0.55);
+        border: 1px solid rgba(255,255,255,0.12);
+        border-radius: 6px;
+        padding: 6px 10px;
+        min-width: 200px;
+        font-size: 12px;
+      }
+
+      .entity-name {
+        font-weight: 600;
+        margin-bottom: 4px;
+        font-size: 13px;
+      }
+
+      .entity-name.team1 { color: #5599ff; }
+      .entity-name.team2 { color: #ff5533; }
+
+      .bar-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 3px;
+      }
+
+      .bar-label {
+        width: 60px;
+        font-size: 10px;
+        opacity: 0.7;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+
+      .bar-track {
+        flex: 1;
+        height: 6px;
+        background: rgba(255,255,255,0.1);
+        border-radius: 3px;
+        overflow: hidden;
+      }
+
+      .bar-fill {
+        height: 100%;
+        border-radius: 3px;
+        transition: width 50ms linear;
+      }
+
+      .bar-fill.health   { background: #44cc66; }
+      .bar-fill.shock    { background: #ff4422; }
+      .bar-fill.fear     { background: #cc8822; }
+
+      .entity-status {
+        font-size: 10px;
+        margin-top: 2px;
+        opacity: 0.6;
+        min-height: 14px;
+      }
+
+      /* Controls bar */
+      #controls {
+        background: rgba(0,0,0,0.7);
+        border-top: 1px solid rgba(255,255,255,0.08);
+        padding: 8px 16px;
+        display: flex;
+        gap: 20px;
+        align-items: center;
+        font-size: 12px;
+        flex-wrap: wrap;
+        pointer-events: all;
+      }
+
+      label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+
+      select, input[type="number"] {
+        background: rgba(255,255,255,0.08);
+        border: 1px solid rgba(255,255,255,0.18);
+        color: #c8d0e0;
+        border-radius: 4px;
+        padding: 3px 6px;
+        font-size: 12px;
+      }
+
+      button {
+        background: rgba(255,255,255,0.1);
+        border: 1px solid rgba(255,255,255,0.2);
+        color: #c8d0e0;
+        border-radius: 4px;
+        padding: 4px 12px;
+        cursor: pointer;
+        font-size: 12px;
+        transition: background 0.15s;
+      }
+
+      button:hover { background: rgba(255,255,255,0.18); }
+      button:active { background: rgba(255,255,255,0.06); }
+
+      #tick-display {
+        opacity: 0.5;
+        font-size: 11px;
+        margin-left: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="canvas-container">
+      <canvas id="ananke-canvas"></canvas>
+
+      <!-- HUD overlay -->
+      <div id="hud">
+        <div id="hud-left">
+          <!-- Entity bars populated by JS -->
+          <div class="entity-bar" id="bar-entity-1">
+            <div class="entity-name team1">Entity 1 (Team 1)</div>
+            <div class="bar-row">
+              <span class="bar-label">Conscious</span>
+              <div class="bar-track"><div class="bar-fill health" id="bar1-consciousness" style="width:100%"></div></div>
+            </div>
+            <div class="bar-row">
+              <span class="bar-label">Shock</span>
+              <div class="bar-track"><div class="bar-fill shock" id="bar1-shock" style="width:0%"></div></div>
+            </div>
+            <div class="bar-row">
+              <span class="bar-label">Fear</span>
+              <div class="bar-track"><div class="bar-fill fear" id="bar1-fear" style="width:0%"></div></div>
+            </div>
+            <div class="entity-status" id="status-1">idle</div>
+          </div>
+
+          <div class="entity-bar" id="bar-entity-2">
+            <div class="entity-name team2">Entity 2 (Team 2)</div>
+            <div class="bar-row">
+              <span class="bar-label">Conscious</span>
+              <div class="bar-track"><div class="bar-fill health" id="bar2-consciousness" style="width:100%"></div></div>
+            </div>
+            <div class="bar-row">
+              <span class="bar-label">Shock</span>
+              <div class="bar-track"><div class="bar-fill shock" id="bar2-shock" style="width:0%"></div></div>
+            </div>
+            <div class="bar-row">
+              <span class="bar-label">Fear</span>
+              <div class="bar-track"><div class="bar-fill fear" id="bar2-fear" style="width:0%"></div></div>
+            </div>
+            <div class="entity-status" id="status-2">idle</div>
+          </div>
+        </div>
+
+        <div id="hud-right">
+          <div>Sim: 20 Hz → Render: 60 Hz</div>
+          <div>Bridge: interpolated</div>
+          <div id="interp-mode">mode: hold</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Controls bar -->
+    <div id="controls">
+      <label>
+        Seed:
+        <input type="number" id="seed-input" value="42" min="1" max="999999" style="width:70px" />
+      </label>
+      <button id="restart-btn">Restart Fight</button>
+      <label>
+        <input type="checkbox" id="extrapolation-toggle" />
+        Extrapolation
+      </label>
+      <label>
+        Speed:
+        <select id="speed-select">
+          <option value="0.25">0.25×</option>
+          <option value="0.5">0.5×</option>
+          <option value="1" selected>1×</option>
+          <option value="2">2×</option>
+          <option value="4">4×</option>
+        </select>
+      </label>
+      <span id="tick-display">tick: 0</span>
+    </div>
+
+    <script type="module">
+      // ── Imports ──────────────────────────────────────────────────────────────
+      //
+      // During development (`npm run dev`), Vite resolves these from node_modules.
+      // The ananke package must be installed: `npm install` in this directory.
+      //
+      // mkHumanoidEntity and mkWorld are Tier-3 exports (sim/testing.ts).
+      // mkKnight / mkBoxer live in src/presets.ts which is not yet re-exported
+      // from the package main index — see TODO below.
+      //
+      // TODO: once @its-not-rocket-science/ananke re-exports presets.ts from its
+      // main index.ts, switch the import below to:
+      //   import { mkKnight, mkBoxer, mkWorld, ... } from "@its-not-rocket-science/ananke";
+
+      import {
+        mkHumanoidEntity,
+        mkWorld,
+        stepWorld,
+        SCALE,
+        extractRigSnapshots,
+        BridgeEngine,
+        STARTER_WEAPONS,
+        q,
+      } from "@its-not-rocket-science/ananke";
+
+      import { AnankeRenderer } from "../src/index.ts";
+
+      // ── Constants ────────────────────────────────────────────────────────────
+
+      const SIM_HZ   = 20;
+      const SIM_MS   = 1000 / SIM_HZ;       // 50 ms per sim tick
+      const ARENA_M  = 2;                    // initial separation in metres
+      const SCALE_M  = SCALE.m ?? 10000;     // fixed-point metres per real metre
+
+      // ── State ────────────────────────────────────────────────────────────────
+
+      let world;
+      let renderer;
+      let simIntervalId;
+      let simSpeed = 1;
+      let tickCount = 0;
+      let fightOver = false;
+
+      // DOM refs
+      const canvas       = document.getElementById("ananke-canvas");
+      const seedInput    = document.getElementById("seed-input");
+      const restartBtn   = document.getElementById("restart-btn");
+      const extrapolTog  = document.getElementById("extrapolation-toggle");
+      const speedSelect  = document.getElementById("speed-select");
+      const tickDisplay  = document.getElementById("tick-display");
+      const interpMode   = document.getElementById("interp-mode");
+
+      // ── Setup ─────────────────────────────────────────────────────────────────
+
+      function getSeed() {
+        return Math.max(1, parseInt(seedInput.value, 10) || 42);
+      }
+
+      /**
+       * Build a fresh world and (re-)initialise the renderer.
+       *
+       * Entity setup:
+       *   Entity 1 — humanoid (team 1, position x=−2 m, y=0)
+       *   Entity 2 — humanoid (team 2, position x=+2 m, y=0)
+       *
+       *   Positions are in fixed-point SCALE.m units (1 m = 10 000 units).
+       *
+       * NOTE: mkHumanoidEntity is a Tier-3 test helper that creates a generic
+       * humanoid. Once mkKnight / mkBoxer are re-exported from the ananke package
+       * main index, switch to those for richer loadouts.
+       */
+      function startFight() {
+        const seed = getSeed();
+        tickCount  = 0;
+        fightOver  = false;
+
+        // mkHumanoidEntity(id, teamId, x_m, y_m) — positions in real metres,
+        // converted internally to SCALE.m fixed-point by testing.ts.
+        const entity1 = mkHumanoidEntity(1, 1, -ARENA_M, 0);
+        const entity2 = mkHumanoidEntity(2, 2,  ARENA_M, 0);
+
+        // Equip with fists (default) — or find a weapon from STARTER_WEAPONS:
+        // const sword = STARTER_WEAPONS.find(w => w.id === "wpn_longsword");
+        // if (sword) entity1.loadout.items.push(sword);
+
+        world = mkWorld(seed, [entity1, entity2]);
+
+        // Commands: both entities attack each other each tick.
+        // TODO: replace with an AI intent loop (see ananke src/sim/ai/).
+      }
+
+      /**
+       * One simulation tick (called at SIM_HZ * simSpeed).
+       */
+      function simTick() {
+        if (!world || fightOver) return;
+
+        // Auto-attack command map: both entities target each other.
+        // EntityCommand shape: { action: "attack", targetId: number }
+        const cmds = new Map([
+          [1, { action: "attack", targetId: 2 }],
+          [2, { action: "attack", targetId: 1 }],
+        ]);
+
+        // Push snapshot into bridge BEFORE advancing the simulation,
+        // so the bridge stores the state at this tick as the "current" snapshot.
+        // On the next tick, it becomes "previous" and interpolation runs between them.
+        renderer.writeSimFrame(world);
+
+        // Advance the simulation by one tick.
+        stepWorld(world, cmds, { tractionCoeff: SCALE.Q });
+
+        tickCount++;
+        tickDisplay.textContent = `tick: ${tickCount}`;
+
+        // Check for fight end (both entities have injury.dead or unconscious)
+        const entities = world.entities;
+        const allDown  = entities.every(e => e.injury.dead || e.injury.consciousness < 0.1 * SCALE.Q);
+        if (allDown && entities.length > 0) {
+          fightOver = true;
+          console.info(`[ananke-demo] Fight over at tick ${tickCount}`);
+        }
+
+        // Update HUD bars from entity condition
+        updateHUD(world);
+      }
+
+      // ── HUD update ────────────────────────────────────────────────────────────
+
+      function updateHUD(world) {
+        for (const e of world.entities) {
+          const id  = e.id;
+          const inj = e.injury;
+          const cond = e.condition;
+
+          const consciousness = Math.round((inj.consciousness / SCALE.Q) * 100);
+          const shock         = Math.round((inj.shock         / SCALE.Q) * 100);
+          const fear          = Math.round(((cond.fearQ ?? 0) / SCALE.Q) * 100);
+
+          const elConsciousness = document.getElementById(`bar${id}-consciousness`);
+          const elShock         = document.getElementById(`bar${id}-shock`);
+          const elFear          = document.getElementById(`bar${id}-fear`);
+          const elStatus        = document.getElementById(`status-${id}`);
+
+          if (elConsciousness) elConsciousness.style.width = `${consciousness}%`;
+          if (elShock)         elShock.style.width         = `${shock}%`;
+          if (elFear)          elFear.style.width           = `${fear}%`;
+
+          if (elStatus) {
+            if (inj.dead)                         elStatus.textContent = "DEAD";
+            else if (inj.consciousness < 0.2 * SCALE.Q) elStatus.textContent = "unconscious";
+            else if (e.intent?.prone)              elStatus.textContent = "prone";
+            else if (e.action?.attackCooldownTicks > 0) elStatus.textContent = "attacking";
+            else if (e.intent?.move?.intensity > 0) elStatus.textContent = "moving";
+            else                                   elStatus.textContent = "idle";
+          }
+        }
+      }
+
+      // ── Render loop ───────────────────────────────────────────────────────────
+
+      function startRenderLoop() {
+        let rafId;
+
+        function loop(timestamp) {
+          renderer.render(timestamp);
+          rafId = requestAnimationFrame(loop);
+        }
+
+        rafId = requestAnimationFrame(loop);
+
+        // Expose for cleanup if needed
+        window.__anankeRafId = rafId;
+      }
+
+      // ── Sim interval ──────────────────────────────────────────────────────────
+
+      function startSimInterval() {
+        clearInterval(simIntervalId);
+        const intervalMs = SIM_MS / simSpeed;
+        simIntervalId = setInterval(simTick, intervalMs);
+      }
+
+      // ── Initialise ────────────────────────────────────────────────────────────
+
+      function init() {
+        startFight();
+
+        renderer = new AnankeRenderer(canvas, {
+          extrapolationAllowed: extrapolTog.checked,
+        });
+        renderer.init();
+
+        // Write the first frame so the bridge has an initial snapshot before
+        // the first render frame fires.
+        renderer.writeSimFrame(world);
+
+        startSimInterval();
+        startRenderLoop();
+      }
+
+      // ── Event handlers ────────────────────────────────────────────────────────
+
+      restartBtn.addEventListener("click", () => {
+        clearInterval(simIntervalId);
+        renderer.dispose();
+        startFight();
+        renderer = new AnankeRenderer(canvas, {
+          extrapolationAllowed: extrapolTog.checked,
+        });
+        renderer.init();
+        renderer.writeSimFrame(world);
+        startSimInterval();
+      });
+
+      extrapolTog.addEventListener("change", () => {
+        // Rebuild renderer with updated extrapolation flag.
+        clearInterval(simIntervalId);
+        renderer.dispose();
+        renderer = new AnankeRenderer(canvas, {
+          extrapolationAllowed: extrapolTog.checked,
+        });
+        renderer.init();
+        renderer.writeSimFrame(world);
+        startSimInterval();
+        interpMode.textContent = extrapolTog.checked ? "mode: extrapolate" : "mode: hold";
+      });
+
+      speedSelect.addEventListener("change", () => {
+        simSpeed = parseFloat(speedSelect.value);
+        startSimInterval();
+      });
+
+      // ── Go ────────────────────────────────────────────────────────────────────
+      init();
+    </script>
+  </body>
+</html>
