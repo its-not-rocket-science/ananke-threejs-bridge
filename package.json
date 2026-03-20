@@ -7,11 +7,12 @@
   "main": "./src/index.ts",
   "scripts": {
     "dev": "vite",
+    "typecheck": "tsc --noEmit",
     "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
-    "@its-not-rocket-science/ananke": "^0.1.1",
+    "@its-not-rocket-science/ananke": "^0.1.4",
     "three": "^0.170.0"
   },
   "devDependencies": {
