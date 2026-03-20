@@ -1,223 +1,306 @@
-// src/entities.ts — EntityMesh: capsule-geometry humanoid per entity.
-//
-// Each entity is represented as a THREE.Group containing:
-//   - A capsule body (CapsuleGeometry)
-//   - A directional indicator disc (shows facing)
-//   - A team-colour rim ring
-//
-// Milestone 2 will replace the capsule with a skinned SkinnedMesh driven
-// by the BridgeEngine's poseModifiers. For now the capsule is the MVP stand-in.
-
 import * as THREE from "three";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { clone as cloneSkeleton } from "three/examples/jsm/utils/SkeletonUtils.js";
+import type { GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
 
-// ── Team colours ──────────────────────────────────────────────────────────────
+import { SegmentBoneMapper } from "./SegmentBoneMapper.js";
 
 export type TeamColourMap = Map<number, THREE.ColorRepresentation>;
 
-/** Default team palette. Extend or replace via AnankeRendererOptions. */
 export const TEAM_COLOURS: TeamColourMap = new Map([
-  [1, 0x3399ff], // team 1 — blue
-  [2, 0xff4422], // team 2 — red
-  [3, 0x22cc44], // team 3 — green
-  [4, 0xffcc00], // team 4 — yellow
+  [1, 0x3399ff],
+  [2, 0xff4422],
+  [3, 0x22cc44],
+  [4, 0xffcc00],
 ]);
 
 const FALLBACK_COLOUR: THREE.ColorRepresentation = 0xaaaaaa;
+const CAPSULE_RADIUS = 0.25;
+const CAPSULE_LENGTH = 1.25;
+const CAPSULE_HEIGHT = CAPSULE_RADIUS * 2 + CAPSULE_LENGTH;
+const CAPSULE_Y_OFFSET = CAPSULE_HEIGHT / 2;
+const MODEL_URL = new URL("../public/models/cc0-humanoid.gltf", import.meta.url).href;
 
-// ── Capsule geometry constants ────────────────────────────────────────────────
+interface HumanoidAsset {
+  scene: THREE.Object3D;
+  animations: THREE.AnimationClip[];
+}
 
-const CAPSULE_RADIUS  = 0.25; // metres
-const CAPSULE_LENGTH  = 1.25; // metres (cylindrical section between hemispheres)
-const CAPSULE_HEIGHT  = CAPSULE_RADIUS * 2 + CAPSULE_LENGTH; // total: 1.75 m
-const CAPSULE_Y_OFFSET = CAPSULE_HEIGHT / 2; // lift capsule so feet are at y=0
-
-// ── EntityMesh ────────────────────────────────────────────────────────────────
-
-/**
- * EntityMesh wraps all Three.js objects for a single entity.
- *
- * Call build() once after construction, then add group to the scene.
- * Call dispose() when the entity is removed from the world.
- */
 export class EntityMesh {
   readonly entityId: number;
   readonly teamId: number;
-
-  /** Root group — translate this to move the entity. */
   readonly group: THREE.Group;
+  readonly visualRoot: THREE.Group;
 
-  // Internal meshes
+  private static assetPromise: Promise<HumanoidAsset> | null = null;
+
   private bodyMesh!: THREE.Mesh;
   private bodyMaterial!: THREE.MeshLambertMaterial;
   private facingDisc!: THREE.Mesh;
   private rimRing!: THREE.Mesh;
+  private modelRoot: THREE.Object3D | null = null;
+  private mixer: THREE.AnimationMixer | null = null;
+  private clips = new Map<string, THREE.AnimationAction>();
+  private mapper: SegmentBoneMapper | null = null;
+  private modelMaterials: THREE.MeshStandardMaterial[] = [];
+  private activeClip = "Idle";
 
-  // State tracking (avoid redundant material updates)
-  private isDead: boolean = false;
-  private isUnconscious: boolean = false;
-  private isProne: boolean = false;
+  private isDead = false;
+  private isUnconscious = false;
+  private isProne = false;
 
   constructor(entityId: number, teamId: number) {
     this.entityId = entityId;
-    this.teamId   = teamId;
-    this.group    = new THREE.Group();
+    this.teamId = teamId;
+    this.group = new THREE.Group();
     this.group.name = `entity_${entityId}`;
+    this.visualRoot = new THREE.Group();
+    this.visualRoot.name = `entity_${entityId}_visual`;
+    this.group.add(this.visualRoot);
   }
 
-  // ── Build ─────────────────────────────────────────────────────────────────
-
-  /**
-   * Build Three.js geometry and add it to this.group.
-   * Must be called once before the group is added to the scene.
-   */
   build(): void {
     const teamColour = TEAM_COLOURS.get(this.teamId) ?? FALLBACK_COLOUR;
 
-    // ── Body capsule ───────────────────────────────────────────────────
     const capsuleGeo = new THREE.CapsuleGeometry(CAPSULE_RADIUS, CAPSULE_LENGTH, 8, 16);
-
-    // TODO (Milestone 2): replace with a skinned mesh and skeleton rig
-    this.bodyMaterial = new THREE.MeshLambertMaterial({
-      color: new THREE.Color(teamColour),
-    });
-
+    this.bodyMaterial = new THREE.MeshLambertMaterial({ color: new THREE.Color(teamColour) });
     this.bodyMesh = new THREE.Mesh(capsuleGeo, this.bodyMaterial);
     this.bodyMesh.position.y = CAPSULE_Y_OFFSET;
     this.bodyMesh.castShadow = true;
-    this.bodyMesh.receiveShadow = false;
-    this.group.add(this.bodyMesh);
+    this.visualRoot.add(this.bodyMesh);
 
-    // ── Facing indicator disc ──────────────────────────────────────────
-    // A small flat disc at the front of the capsule base showing facing direction.
     const discGeo = new THREE.CircleGeometry(0.12, 12);
     discGeo.rotateX(-Math.PI / 2);
-    const discMat = new THREE.MeshBasicMaterial({ color: 0xffffff, opacity: 0.6, transparent: true });
-    this.facingDisc = new THREE.Mesh(discGeo, discMat);
-    this.facingDisc.position.set(0, 0.02, -CAPSULE_RADIUS - 0.05); // in front of capsule base
+    this.facingDisc = new THREE.Mesh(
+      discGeo,
+      new THREE.MeshBasicMaterial({ color: 0xffffff, opacity: 0.6, transparent: true }),
+    );
+    this.facingDisc.position.set(0, 0.02, -CAPSULE_RADIUS - 0.05);
     this.group.add(this.facingDisc);
 
-    // ── Team rim ring ──────────────────────────────────────────────────
-    const ringGeo = new THREE.TorusGeometry(CAPSULE_RADIUS + 0.06, 0.03, 6, 32);
+    const ringGeo = new THREE.TorusGeometry(CAPSULE_RADIUS + 0.12, 0.03, 8, 32);
     ringGeo.rotateX(Math.PI / 2);
-    const ringMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(teamColour) });
-    this.rimRing = new THREE.Mesh(ringGeo, ringMat);
+    this.rimRing = new THREE.Mesh(
+      ringGeo,
+      new THREE.MeshBasicMaterial({ color: new THREE.Color(teamColour) }),
+    );
     this.rimRing.position.y = 0.02;
     this.group.add(this.rimRing);
+
+    void this.attachHumanoidModel();
   }
 
-  // ── State setters ─────────────────────────────────────────────────────────
+  hasClipAnimation(): boolean {
+    return this.mixer !== null && this.clips.size > 0;
+  }
 
-  /**
-   * Toggle the dead visual state (grey, collapsed rotation).
-   * When dead, prone rotation is also applied and the entity is greyed out.
-   */
+  playClip(clipName: "Idle" | "Attack" | "Prone" | "Unconscious", fadeSeconds: number): void {
+    if (!this.mixer) {
+      return;
+    }
+
+    const next = this.clips.get(clipName);
+    const current = this.clips.get(this.activeClip);
+    if (!next) {
+      return;
+    }
+
+    if (this.activeClip === clipName && clipName !== "Attack") {
+      return;
+    }
+
+    if (clipName === "Attack") {
+      next.reset();
+      next.setLoop(THREE.LoopOnce, 1);
+      next.clampWhenFinished = true;
+      next.fadeIn(fadeSeconds).play();
+      if (current && current !== next) {
+        current.fadeOut(fadeSeconds * 0.75);
+      }
+      this.activeClip = clipName;
+      return;
+    }
+
+    next.reset();
+    next.setLoop(THREE.LoopRepeat, Infinity);
+    next.clampWhenFinished = false;
+    next.fadeIn(fadeSeconds).play();
+
+    if (current && current !== next) {
+      current.fadeOut(fadeSeconds);
+    }
+
+    this.activeClip = clipName;
+  }
+
+  setClipTimeScale(scale: number): void {
+    const action = this.clips.get(this.activeClip);
+    if (action) {
+      action.timeScale = scale;
+    }
+  }
+
+  updateMixer(deltaSeconds: number): void {
+    this.mixer?.update(deltaSeconds);
+  }
+
   setDead(dead: boolean): void {
-    if (this.isDead === dead) return;
     this.isDead = dead;
-
-    if (dead) {
-      this.bodyMaterial.color.set(0x555555);
-      this.bodyMaterial.opacity = 0.7;
-      this.bodyMaterial.transparent = true;
-      // Rotate capsule to lie on its side — Z-axis rotation 90° puts it horizontal.
-      this.bodyMesh.rotation.z = Math.PI / 2;
-      this.bodyMesh.position.set(0, CAPSULE_RADIUS, 0);
-      this.facingDisc.visible = false;
-    } else {
-      // Restore upright state (setUnconscious will re-apply if needed).
-      this.bodyMesh.rotation.z = 0;
-      this.bodyMesh.position.y = CAPSULE_Y_OFFSET;
-      this.facingDisc.visible = true;
-      this.refreshColour();
+    this.refreshColour();
+    if (!this.modelRoot) {
+      if (dead) {
+        this.bodyMesh.rotation.z = Math.PI / 2;
+        this.bodyMesh.position.set(0, CAPSULE_RADIUS, 0);
+        this.facingDisc.visible = false;
+      } else {
+        this.bodyMesh.rotation.z = 0;
+        this.bodyMesh.position.set(0, CAPSULE_Y_OFFSET, 0);
+        this.facingDisc.visible = true;
+      }
     }
   }
 
-  /**
-   * Toggle the unconscious visual state (darkened, slightly tilted).
-   */
   setUnconscious(unconscious: boolean): void {
-    if (this.isUnconscious === unconscious) return;
     this.isUnconscious = unconscious;
-
-    if (unconscious && !this.isDead) {
-      this.bodyMaterial.color.set(0x334455);
-      // Tilt 60° — not fully flat (that is reserved for dead/prone)
-      this.bodyMesh.rotation.z = Math.PI / 3;
-      this.bodyMesh.position.set(0, CAPSULE_RADIUS + 0.1, 0);
-    } else if (!this.isDead) {
-      this.bodyMesh.rotation.z = 0;
-      this.bodyMesh.position.y = CAPSULE_Y_OFFSET;
-      this.refreshColour();
+    this.refreshColour();
+    if (!this.modelRoot && !this.isDead) {
+      if (unconscious) {
+        this.bodyMesh.rotation.z = Math.PI / 3;
+        this.bodyMesh.position.set(0, CAPSULE_RADIUS + 0.1, 0);
+      } else {
+        this.bodyMesh.rotation.z = 0;
+        this.bodyMesh.position.set(0, CAPSULE_Y_OFFSET, 0);
+      }
     }
   }
 
-  /**
-   * Toggle prone posture — capsule rotates to horizontal.
-   */
   setProne(prone: boolean): void {
-    if (this.isProne === prone) return;
     this.isProne = prone;
-
-    // Dead handling overrides prone rotation — skip if dead
-    if (this.isDead) return;
-
-    if (prone && !this.isUnconscious) {
-      this.bodyMesh.rotation.z = Math.PI / 2;
-      this.bodyMesh.position.set(0, CAPSULE_RADIUS + 0.02, 0);
-      this.facingDisc.visible = false;
-    } else if (!this.isUnconscious) {
-      this.bodyMesh.rotation.z = 0;
-      this.bodyMesh.position.y = CAPSULE_Y_OFFSET;
-      this.facingDisc.visible = true;
+    if (!this.modelRoot && !this.isDead && !this.isUnconscious) {
+      if (prone) {
+        this.bodyMesh.rotation.z = Math.PI / 2;
+        this.bodyMesh.position.set(0, CAPSULE_RADIUS + 0.02, 0);
+        this.facingDisc.visible = false;
+      } else {
+        this.bodyMesh.rotation.z = 0;
+        this.bodyMesh.position.set(0, CAPSULE_Y_OFFSET, 0);
+        this.facingDisc.visible = true;
+      }
     }
   }
 
-  /**
-   * Drive shock visual — adds a red emissive flash proportional to shockFloat [0, 1].
-   * At high shock values the capsule flickers red (hit feedback).
-   *
-   * TODO (Milestone 2): replace with a post-processing pass (bloom / vignette).
-   */
   setShockIntensity(shockFloat: number): void {
-    if (this.isDead) return;
-    const r = Math.min(1, shockFloat * 2);
-    this.bodyMaterial.emissive.set(r * 0.6, 0, 0);
+    const emissive = Math.min(0.4, shockFloat * 0.4);
+    this.bodyMaterial.emissive.setRGB(emissive, 0, 0);
+    for (const material of this.modelMaterials) {
+      material.emissive.setRGB(emissive, 0, 0);
+      material.needsUpdate = true;
+    }
   }
 
-  /**
-   * Apply a per-segment injury tint to a named bone.
-   * Currently a stub — Milestone 2 will drive actual bone transforms.
-   *
-   * @param boneName  The Three.js bone name from the segment mapping.
-   * @param impairment Normalised impairment [0, 1] from mod.impairmentQ / SCALE.Q.
-   *
-   * TODO (Milestone 2): traverse skeleton, find bone by name, apply transform/blend.
-   */
-  setSegmentImpairment(_boneName: string, _impairment: number): void {
-    // Stub: no-op until skeleton rig is wired up.
-    // When Milestone 2 is implemented:
-    //   const bone = this.skeleton.getBoneByName(boneName);
-    //   if (bone) { bone.scale.setScalar(1 - impairment * 0.2); }
+  setSegmentImpairment(boneName: string, impairment: number): void {
+    this.mapper?.applyImpairment(boneName, impairment);
   }
 
-  // ── Disposal ───────────────────────────────────────────────────────────────
+  resetPoseModifiers(): void {
+    this.mapper?.resetImpairments();
+  }
+
+  resetVisualPose(): void {
+    this.visualRoot.position.set(0, 0, 0);
+    this.visualRoot.rotation.set(0, 0, 0);
+  }
 
   dispose(): void {
     this.bodyMesh.geometry.dispose();
     this.bodyMaterial.dispose();
-    (this.facingDisc.material as THREE.MeshBasicMaterial).dispose();
+    (this.facingDisc.material as THREE.Material).dispose();
     this.facingDisc.geometry.dispose();
-    (this.rimRing.material as THREE.MeshBasicMaterial).dispose();
+    (this.rimRing.material as THREE.Material).dispose();
     this.rimRing.geometry.dispose();
+    this.mixer?.stopAllAction();
+    this.modelMaterials.forEach((material) => material.dispose());
+    this.modelRoot?.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        child.geometry.dispose();
+      }
+    });
   }
 
-  // ── Private helpers ────────────────────────────────────────────────────────
+  private async attachHumanoidModel(): Promise<void> {
+    try {
+      const asset = await EntityMesh.loadHumanoidAsset();
+      const clonedRoot = cloneSkeleton(asset.scene);
+      clonedRoot.position.y = 0;
+      clonedRoot.scale.setScalar(0.92);
+      clonedRoot.visible = true;
+
+      this.mapper = SegmentBoneMapper.fromObject(clonedRoot);
+      this.modelRoot = clonedRoot;
+      this.visualRoot.add(clonedRoot);
+      this.bodyMesh.visible = false;
+
+      this.modelMaterials = [];
+      clonedRoot.traverse((child: THREE.Object3D) => {
+        if (!(child instanceof THREE.Mesh)) {
+          return;
+        }
+        child.castShadow = true;
+        child.receiveShadow = false;
+        const material = Array.isArray(child.material) ? child.material[0] : child.material;
+        if (material instanceof THREE.MeshStandardMaterial) {
+          material.color.set(TEAM_COLOURS.get(this.teamId) ?? FALLBACK_COLOUR);
+          material.roughness = 0.95;
+          material.metalness = 0.05;
+          this.modelMaterials.push(material);
+        }
+      });
+
+      this.mixer = new THREE.AnimationMixer(clonedRoot);
+      this.clips = new Map(
+        asset.animations.map((clip) => {
+          const action = this.mixer!.clipAction(clip);
+          action.enabled = true;
+          return [clip.name, action] as const;
+        }),
+      );
+      this.playClip("Idle", 0);
+      this.refreshColour();
+    } catch (error) {
+      console.warn("Failed to load CC0 humanoid model, using capsule fallback.", error);
+    }
+  }
 
   private refreshColour(): void {
     const teamColour = TEAM_COLOURS.get(this.teamId) ?? FALLBACK_COLOUR;
-    this.bodyMaterial.color.set(teamColour);
-    this.bodyMaterial.opacity = 1;
-    this.bodyMaterial.transparent = false;
-    this.bodyMaterial.emissive.set(0, 0, 0);
+    const displayColour = this.isDead
+      ? 0x555555
+      : this.isUnconscious
+        ? 0x5f6a7a
+        : teamColour;
+
+    this.bodyMaterial.color.set(displayColour);
+    this.bodyMaterial.opacity = this.isDead ? 0.7 : 1;
+    this.bodyMaterial.transparent = this.isDead;
+
+    for (const material of this.modelMaterials) {
+      material.color.set(displayColour);
+      material.opacity = this.isDead ? 0.78 : 1;
+      material.transparent = this.isDead;
+      material.needsUpdate = true;
+    }
+
+    this.facingDisc.visible = !(this.isDead || this.isProne);
+  }
+
+  private static loadHumanoidAsset(): Promise<HumanoidAsset> {
+    if (!EntityMesh.assetPromise) {
+      const loader = new GLTFLoader();
+      EntityMesh.assetPromise = loader.loadAsync(MODEL_URL).then((gltf: GLTF) => ({
+        scene: gltf.scene,
+        animations: gltf.animations,
+      }));
+    }
+    return EntityMesh.assetPromise;
   }
 }

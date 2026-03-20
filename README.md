@@ -60,6 +60,8 @@ The build resolves Ananke via a path alias in `vite.config.ts`. No server-side N
 
 Everything runs in a single browser tab. The Ananke kernel and Three.js share the same JS thread. A `setInterval` drives the 20 Hz simulation loop; `requestAnimationFrame` drives the render loop.
 
+The current demo now includes a generated CC0 humanoid GLTF asset (`public/models/cc0-humanoid.gltf`) with `Idle`, `Attack`, `Prone`, and `Unconscious` clips, plus HUD controls for seed selection, start/reset, speed, and replay download.
+
 ```
 Browser (single tab)
 │
