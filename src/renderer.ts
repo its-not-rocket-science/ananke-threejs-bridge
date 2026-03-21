@@ -1,21 +1,17 @@
-import {
-  BridgeEngine,
-  SCALE,
-  extractRigSnapshots,
-} from "@its-not-rocket-science/ananke";
 import type {
   BodyPlanMapping,
   BridgeConfig,
   InterpolatedState,
   WorldState,
 } from "@its-not-rocket-science/ananke";
+import { SCALE } from "@its-not-rocket-science/ananke";
 import * as THREE from "three";
 
 import { AnimationController } from "./animation.js";
 import { EntityMesh } from "./entities.js";
+import { InterpolationBuffer } from "./InterpolationBuffer.js";
 import { SceneBuilder } from "./scene.js";
 import type { SceneConfig } from "./scene.js";
-import { DEFAULT_HUMANOID_SEGMENT_BONES } from "./SegmentBoneMapper.js";
 
 const INTERPOLATION_BACK_TIME_S = 1 / 20;
 
@@ -51,14 +47,14 @@ export class AnankeRenderer {
   private threeRenderer!: THREE.WebGLRenderer;
   private scene!: THREE.Scene;
   private camera!: THREE.PerspectiveCamera;
-  private bridgeEngine!: BridgeEngine;
+  private interpolationBuffer!: InterpolationBuffer;
   private bridgeConfig!: BridgeConfig;
   private sceneBuilder!: SceneBuilder;
 
   private entityMeshes = new Map<number, EntityMesh>();
   private entityAnimControllers = new Map<number, AnimationController>();
   private resizeObserver: ResizeObserver | null = null;
-  private startTime_ms = 0;
+  private lastSnapshotWallTime_ms: number | null = null;
   private lastRenderTimestamp_ms: number | null = null;
   private renderFrameHandle: number | null = null;
   private isInitialised = false;
@@ -88,8 +84,7 @@ export class AnankeRenderer {
       extrapolationAllowed: this.options.extrapolationAllowed ?? false,
       defaultBoneName: "Hips",
     };
-    this.bridgeEngine = new BridgeEngine(this.bridgeConfig);
-    this.startTime_ms = performance.now();
+    this.interpolationBuffer = new InterpolationBuffer(this.bridgeConfig);
 
     this.resizeObserver = new ResizeObserver(() => this.handleResize());
     this.resizeObserver.observe(this.canvas);
@@ -120,14 +115,14 @@ export class AnankeRenderer {
   }
 
   reset(): void {
-    this.bridgeEngine.clear();
+    this.interpolationBuffer.clear();
     for (const mesh of this.entityMeshes.values()) {
       mesh.dispose();
       this.scene.remove(mesh.group);
     }
     this.entityMeshes.clear();
     this.entityAnimControllers.clear();
-    this.startTime_ms = performance.now();
+    this.lastSnapshotWallTime_ms = null;
     this.lastRenderTimestamp_ms = null;
   }
 
@@ -136,9 +131,9 @@ export class AnankeRenderer {
       throw new Error("AnankeRenderer.init() must be called before writeSimFrame().");
     }
 
-    const snapshots = extractRigSnapshots(world);
     this.syncEntityMeshes(world);
-    this.bridgeEngine.update(snapshots);
+    this.interpolationBuffer.pushWorld(world);
+    this.lastSnapshotWallTime_ms = performance.now();
   }
 
   render(timestamp: number): void {
@@ -151,11 +146,16 @@ export class AnankeRenderer {
       : Math.min(0.1, (timestamp - this.lastRenderTimestamp_ms) / 1000);
     this.lastRenderTimestamp_ms = timestamp;
 
-    const elapsed_s = (timestamp - this.startTime_ms) / 1000;
-    const renderTime_s = Math.max(0, elapsed_s - INTERPOLATION_BACK_TIME_S);
+    const snapshotAge_s = this.lastSnapshotWallTime_ms === null
+      ? 0
+      : Math.max(0, (timestamp - this.lastSnapshotWallTime_ms) / 1000);
+    const renderTime_s = Math.max(
+      0,
+      this.interpolationBuffer.getLatestSimTime() + snapshotAge_s - INTERPOLATION_BACK_TIME_S,
+    );
 
     for (const [entityId, mesh] of this.entityMeshes) {
-      const state = this.bridgeEngine.getInterpolatedState(entityId, renderTime_s);
+      const state = this.interpolationBuffer.getInterpolatedState(entityId, renderTime_s);
       if (!state) {
         continue;
       }
@@ -210,7 +210,7 @@ export class AnankeRenderer {
       this.scene.add(mesh.group);
       this.entityMeshes.set(entity.id, mesh);
       this.entityAnimControllers.set(entity.id, new AnimationController(mesh));
-      this.bridgeEngine.setEntityBodyPlan(entity.id, HUMANOID_SEGMENT_MAPPING.bodyPlanId);
+      this.interpolationBuffer.setEntityBodyPlan(entity.id, HUMANOID_SEGMENT_MAPPING.bodyPlanId);
     }
 
     for (const [entityId, mesh] of this.entityMeshes) {
@@ -221,7 +221,7 @@ export class AnankeRenderer {
       this.scene.remove(mesh.group);
       this.entityMeshes.delete(entityId);
       this.entityAnimControllers.delete(entityId);
-      this.bridgeEngine.removeEntity(entityId);
+      this.interpolationBuffer.removeEntity(entityId);
     }
   }
 
