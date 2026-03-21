@@ -173,7 +173,7 @@
         <div id="hud-left">
           <!-- Entity bars populated by JS -->
           <div class="entity-bar" id="bar-entity-1">
-            <div class="entity-name team1">Entity 1 (Team 1)</div>
+            <div class="entity-name team1">Knight (Team 1)</div>
             <div class="bar-row">
               <span class="bar-label">Conscious</span>
               <div class="bar-track"><div class="bar-fill health" id="bar1-consciousness" style="width:100%"></div></div>
@@ -190,7 +190,7 @@
           </div>
 
           <div class="entity-bar" id="bar-entity-2">
-            <div class="entity-name team2">Entity 2 (Team 2)</div>
+            <div class="entity-name team2">Brawler (Team 2)</div>
             <div class="bar-row">
               <span class="bar-label">Conscious</span>
               <div class="bar-track"><div class="bar-fill health" id="bar2-consciousness" style="width:100%"></div></div>
@@ -208,8 +208,8 @@
         </div>
 
         <div id="hud-right">
-          <div>Sim: 20 Hz via setInterval</div>
-          <div>Render: requestAnimationFrame + interpolation buffer</div>
+          <div>Sim: 20 Hz fixed-step loop</div>
+          <div>Render: requestAnimationFrame + double-buffer interpolation</div>
           <div>State: <span id="sim-status">paused</span></div>
         </div>
       </div>

@@ -11,12 +11,19 @@ const speedSelect = document.getElementById("speed-select") as HTMLSelectElement
 const tickDisplay = document.getElementById("tick-display") as HTMLSpanElement;
 const statusDisplay = document.getElementById("sim-status") as HTMLSpanElement;
 
-const renderer = new AnankeRenderer(canvas);
+const renderer = new AnankeRenderer(canvas, {
+  scene: {
+    cameraPosition: { x: 0, y: 6.25, z: 9.5 },
+    cameraTarget: { x: 0, y: 1.4, z: 0 },
+    fogNear: 14,
+    fogFar: 36,
+  },
+});
 renderer.init();
 renderer.startRenderLoop();
 
 const simLoop = new SimLoop({
-  seed: Number(seedInput.value),
+  seed: sanitiseSeed(seedInput.value),
   onReset(world) {
     renderer.reset();
     renderer.writeSimFrame(world);
@@ -46,10 +53,7 @@ startButton.addEventListener("click", () => {
 });
 
 resetButton.addEventListener("click", () => {
-  const seed = Math.max(1, Math.trunc(Number(seedInput.value) || 1));
-  seedInput.value = String(seed);
-  simLoop.reset(seed);
-  syncButtons();
+  restartWithSeed();
 });
 
 replayButton.addEventListener("click", () => {
@@ -66,10 +70,34 @@ speedSelect.addEventListener("change", () => {
   simLoop.setSpeed(Number(speedSelect.value));
 });
 
+seedInput.addEventListener("change", () => {
+  restartWithSeed();
+});
+
+seedInput.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") {
+    return;
+  }
+
+  event.preventDefault();
+  restartWithSeed();
+});
+
 window.addEventListener("beforeunload", () => {
   simLoop.stop();
   renderer.dispose();
 });
+
+function restartWithSeed(): void {
+  const seed = sanitiseSeed(seedInput.value);
+  seedInput.value = String(seed);
+  simLoop.reset(seed);
+  syncButtons();
+}
+
+function sanitiseSeed(rawValue: string): number {
+  return Math.max(1, Math.trunc(Number(rawValue) || 1));
+}
 
 function updateHud(world: ReturnType<SimLoop["getWorld"]>): void {
   tickDisplay.textContent = `tick: ${world.tick}`;
@@ -109,4 +137,5 @@ function isFightOver(world: ReturnType<SimLoop["getWorld"]>): boolean {
 
 function syncButtons(): void {
   startButton.textContent = simLoop.running ? "Pause" : "Start";
+  resetButton.textContent = `Restart (${simLoop.getSeed()})`;
 }

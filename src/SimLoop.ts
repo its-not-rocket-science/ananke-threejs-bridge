@@ -69,11 +69,7 @@ export class SimLoop {
   }
 
   stop(): void {
-    if (this.intervalId !== null) {
-      window.clearInterval(this.intervalId);
-      this.intervalId = null;
-      this.onStop?.(this.world);
-    }
+    this.halt(true);
   }
 
   setSpeed(speed: number): void {
@@ -81,7 +77,7 @@ export class SimLoop {
   }
 
   reset(seed = this.seed): WorldState {
-    this.stop();
+    this.halt(false);
     this.seed = seed;
     this.world = this.createScenario(seed);
     this.recorder = new ReplayRecorder(this.world);
@@ -95,6 +91,19 @@ export class SimLoop {
 
   serializeReplay(): string {
     return serializeReplay(this.recorder.toReplay());
+  }
+
+  private halt(notifyStop: boolean): void {
+    if (this.intervalId === null) {
+      return;
+    }
+
+    window.clearInterval(this.intervalId);
+    this.intervalId = null;
+
+    if (notifyStop) {
+      this.onStop?.(this.world);
+    }
   }
 
   private tick(): void {

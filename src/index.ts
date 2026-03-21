@@ -11,5 +11,6 @@ export { AnimationController } from "./animation.js";
 export type { AnimationState } from "./animation.js";
 
 export { SegmentBoneMapper, DEFAULT_HUMANOID_SEGMENT_BONES } from "./SegmentBoneMapper.js";
+export { InterpolationBuffer } from "./InterpolationBuffer.js";
 export { SimLoop } from "./SimLoop.js";
 export type { SimLoopOptions } from "./SimLoop.js";
